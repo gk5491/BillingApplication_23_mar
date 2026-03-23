@@ -54,10 +54,15 @@ import ItemDetailPage from "@/pages/inventory/ItemDetailPage";
 import CategoriesPage from "@/pages/inventory/CategoriesPage";
 import CategoryDetailPage from "@/pages/inventory/CategoryDetailPage";
 import PriceListsPage from "@/pages/inventory/PriceListsPage";
+import PriceListDetailPage from "@/pages/inventory/PriceListDetailPage";
 import WarehousesPage from "@/pages/inventory/WarehousesPage";
+import WarehouseDetailPage from "@/pages/inventory/WarehouseDetailPage";
 import StockTransfersPage from "@/pages/inventory/StockTransfersPage";
+import StockTransferDetailPage from "@/pages/inventory/StockTransferDetailPage";
 import AdjustmentsPage from "@/pages/inventory/AdjustmentsPage";
+import AdjustmentDetailPage from "@/pages/inventory/AdjustmentDetailPage";
 import StockLedgerPage from "@/pages/inventory/StockLedgerPage";
+import StockMovementDetailPage from "@/pages/inventory/StockMovementDetailPage";
 import ChartOfAccountsPage from "@/pages/accounting/ChartOfAccountsPage";
 import JournalEntriesPage from "@/pages/accounting/JournalEntriesPage";
 import LedgerPage from "@/pages/accounting/LedgerPage";
@@ -157,10 +162,15 @@ const App = () => (
               <Route path="/inventory/categories" element={<CategoriesPage />} />
               <Route path="/inventory/categories/:id" element={<CategoryDetailPage />} />
               <Route path="/inventory/price-lists" element={<PriceListsPage />} />
+              <Route path="/inventory/price-lists/:id" element={<PriceListDetailPage />} />
               <Route path="/inventory/warehouses" element={<WarehousesPage />} />
+              <Route path="/inventory/warehouses/:id" element={<WarehouseDetailPage />} />
               <Route path="/inventory/stock-transfers" element={<StockTransfersPage />} />
+              <Route path="/inventory/stock-transfers/:id" element={<StockTransferDetailPage />} />
               <Route path="/inventory/adjustments" element={<AdjustmentsPage />} />
+              <Route path="/inventory/adjustments/:id" element={<AdjustmentDetailPage />} />
               <Route path="/inventory/stock-ledger" element={<StockLedgerPage />} />
+              <Route path="/inventory/stock-ledger/:id" element={<StockMovementDetailPage />} />
               <Route path="/expenses" element={<ExpensesPage />} />
               <Route path="/accounting/chart" element={<ChartOfAccountsPage />} />
               <Route path="/accounting/journals" element={<JournalEntriesPage />} />
@@ -195,6 +205,5 @@ const App = () => (
 );
 
 export default App;
-
 
 

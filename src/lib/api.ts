@@ -356,6 +356,7 @@ export const taxRatesApi = {
 export const stockMovementsApi = {
   list: () => api.get<any[]>("/stock-movements"),
   listPage: (page: number) => api.get<PaginatedResponse<any>>(getPaginatedPath("/stock-movements", page)),
+  get: (id: string) => api.get<any>(`/stock-movements/${id}`),
 };
 
 // ===== JOURNAL ENTRIES =====
@@ -437,6 +438,7 @@ export const itemCategoriesApi = {
 export const priceListsApi = {
   list: () => api.get<any[]>("/price-lists"),
   listPage: (page: number) => api.get<PaginatedResponse<any>>(getPaginatedPath("/price-lists", page)),
+  get: (id: string) => api.get<any>(`/price-lists/${id}`),
   create: (pl: any, items: any[]) => api.post<any>("/price-lists", { ...pl, items }),
   delete: (id: string) => api.delete(`/price-lists/${id}`),
 };
@@ -445,6 +447,7 @@ export const priceListsApi = {
 export const warehousesApi = {
   list: () => api.get<any[]>("/warehouses"),
   listPage: (page: number) => api.get<PaginatedResponse<any>>(getPaginatedPath("/warehouses", page)),
+  get: (id: string) => api.get<any>(`/warehouses/${id}`),
   create: (w: any) => api.post<any>("/warehouses", w),
   update: (id: string, updates: any) => api.put<any>(`/warehouses/${id}`, updates),
   delete: (id: string) => api.delete(`/warehouses/${id}`),
@@ -454,6 +457,7 @@ export const warehousesApi = {
 export const inventoryAdjustmentsApi = {
   list: () => api.get<any[]>("/inventory-adjustments"),
   listPage: (page: number) => api.get<PaginatedResponse<any>>(getPaginatedPath("/inventory-adjustments", page)),
+  get: (id: string) => api.get<any>(`/inventory-adjustments/${id}`),
   create: (adj: any, items: any[]) => api.post<any>("/inventory-adjustments", { ...adj, items }),
 };
 
@@ -461,6 +465,7 @@ export const inventoryAdjustmentsApi = {
 export const stockTransfersApi = {
   list: () => api.get<any[]>("/stock-transfers"),
   listPage: (page: number) => api.get<PaginatedResponse<any>>(getPaginatedPath("/stock-transfers", page)),
+  get: (id: string) => api.get<any>(`/stock-transfers/${id}`),
   create: (transfer: any, items: any[]) => api.post<any>("/stock-transfers", { ...transfer, items }),
 };
 

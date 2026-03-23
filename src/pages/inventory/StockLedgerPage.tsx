@@ -5,9 +5,11 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useState } from "react";
 import { AppPagination } from "@/components/AppPagination";
 import { emptyPaginatedResponse } from "@/lib/pagination";
+import { useNavigate } from "react-router-dom";
 
 export default function StockLedgerPage() {
   const [page, setPage] = useState(1);
+  const navigate = useNavigate();
   const { data: response = emptyPaginatedResponse<any>(), isLoading } = useQuery({
     queryKey: ["stock_movements", page],
     queryFn: () => stockMovementsApi.listPage(page),
@@ -38,7 +40,7 @@ export default function StockLedgerPage() {
               </thead>
               <tbody>
                 {movements.map((m: any) => (
-                  <tr key={m.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                  <tr key={m.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors cursor-pointer" onClick={() => navigate(`/inventory/stock-ledger/${m.id}`)}>
                     <td className="px-5 py-3 text-muted-foreground">{new Date(m.created_at).toLocaleDateString()}</td>
                     <td className="px-5 py-3 font-medium text-card-foreground">{m.item_name || "-"}</td>
                     <td className="px-5 py-3"><StatusBadge status={m.movement_type} /></td>

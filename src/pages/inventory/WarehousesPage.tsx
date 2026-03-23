@@ -9,10 +9,12 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { AppPagination } from "@/components/AppPagination";
 import { emptyPaginatedResponse } from "@/lib/pagination";
+import { useNavigate } from "react-router-dom";
 
 export default function WarehousesPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ warehouse_name: "", address: "" });
   const [page, setPage] = useState(1);
@@ -37,7 +39,10 @@ export default function WarehousesPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Warehouses</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Warehouses</h1>
+          <p className="text-sm text-muted-foreground mt-1">Create warehouses first, then use them in stock transfers and inventory adjustments.</p>
+        </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button size="sm"><Plus className="w-4 h-4 mr-1" /> New Warehouse</Button></DialogTrigger>
           <DialogContent>
@@ -52,15 +57,16 @@ export default function WarehousesPage() {
       </div>
       <div className="border border-border rounded-lg overflow-hidden">
         <Table>
-          <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Address</TableHead><TableHead></TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Address</TableHead><TableHead>Usage</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
-            {isLoading ? <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow> :
-            warehouses.length === 0 ? <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No warehouses</TableCell></TableRow> :
+            {isLoading ? <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow> :
+            warehouses.length === 0 ? <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No warehouses</TableCell></TableRow> :
             warehouses.map((w: any) => (
-              <TableRow key={w.id}>
+              <TableRow key={w.id} className="cursor-pointer hover:bg-muted/30" onClick={() => navigate(`/inventory/warehouses/${w.id}`)}>
                 <TableCell className="font-medium">{w.warehouse_name || w.warehouseName}</TableCell>
                 <TableCell className="text-muted-foreground">{w.address}</TableCell>
-                <TableCell><Button variant="ghost" size="icon" onClick={() => deleteMut.mutate(w.id)}><Trash2 className="w-4 h-4 text-destructive" /></Button></TableCell>
+                <TableCell className="text-muted-foreground">{Number(w.transfer_count || 0)} transfers, {Number(w.adjustment_count || 0)} adjustments</TableCell>
+                <TableCell><Button variant="ghost" size="icon" onClick={(event) => { event.stopPropagation(); deleteMut.mutate(w.id); }}><Trash2 className="w-4 h-4 text-destructive" /></Button></TableCell>
               </TableRow>
             ))}
           </TableBody>

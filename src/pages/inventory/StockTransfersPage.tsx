@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { stockTransfersApi, warehousesApi } from "@/lib/api";
+import { itemsApi, stockTransfersApi, warehousesApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus } from "lucide-react";
+import { ArrowRightLeft, Plus } from "lucide-react";
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -11,12 +11,14 @@ import { useToast } from "@/hooks/use-toast";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AppPagination } from "@/components/AppPagination";
 import { emptyPaginatedResponse } from "@/lib/pagination";
+import { useNavigate } from "react-router-dom";
 
 export default function StockTransfersPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ from_warehouse_id: "", to_warehouse_id: "", notes: "" });
+  const [form, setForm] = useState({ from_warehouse_id: "", to_warehouse_id: "", item_id: "", quantity: "", notes: "" });
   const [page, setPage] = useState(1);
 
   const { data: response = emptyPaginatedResponse<any>(), isLoading } = useQuery({
@@ -29,6 +31,10 @@ export default function StockTransfersPage() {
     queryKey: ["warehouses"],
     queryFn: () => warehousesApi.list(),
   });
+  const { data: items = [] } = useQuery({
+    queryKey: ["items"],
+    queryFn: () => itemsApi.list(),
+  });
 
   const createMut = useMutation({
     mutationFn: () => stockTransfersApi.create({
@@ -36,15 +42,25 @@ export default function StockTransfersPage() {
       from_warehouse_id: form.from_warehouse_id || null,
       to_warehouse_id: form.to_warehouse_id || null,
       notes: form.notes,
-    }, []),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["stock_transfers"] }); setOpen(false); toast({ title: "Transfer created" }); },
+    }, [{ item_id: form.item_id, quantity: Number(form.quantity || 0) }]),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stock_transfers"] });
+      qc.invalidateQueries({ queryKey: ["stock_movements"] });
+      qc.invalidateQueries({ queryKey: ["items"] });
+      setOpen(false);
+      setForm({ from_warehouse_id: "", to_warehouse_id: "", item_id: "", quantity: "", notes: "" });
+      toast({ title: "Transfer created" });
+    },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Stock Transfers</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Stock Transfers</h1>
+          <p className="text-sm text-muted-foreground mt-1">Move item quantities between warehouses and keep the movement visible in the stock ledger.</p>
+        </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button size="sm"><Plus className="w-4 h-4 mr-1" /> New Transfer</Button></DialogTrigger>
           <DialogContent>
@@ -58,8 +74,13 @@ export default function StockTransfersPage() {
                 <SelectTrigger><SelectValue placeholder="To Warehouse" /></SelectTrigger>
                 <SelectContent>{warehouses.map((w: any) => <SelectItem key={w.id} value={w.id}>{w.warehouse_name || w.warehouseName}</SelectItem>)}</SelectContent>
               </Select>
+              <Select value={form.item_id} onValueChange={(v) => setForm({ ...form, item_id: v })}>
+                <SelectTrigger><SelectValue placeholder="Item" /></SelectTrigger>
+                <SelectContent>{items.map((item: any) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent>
+              </Select>
+              <Input placeholder="Quantity" type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
               <Input placeholder="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-              <Button onClick={() => createMut.mutate()} className="w-full">Create</Button>
+              <Button onClick={() => createMut.mutate()} disabled={!form.from_warehouse_id || !form.to_warehouse_id || !form.item_id || Number(form.quantity || 0) <= 0} className="w-full">Create</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -67,15 +88,21 @@ export default function StockTransfersPage() {
       <div className="border border-border rounded-lg overflow-hidden">
         <Table>
           <TableHeader><TableRow>
-            <TableHead>Number</TableHead><TableHead>Date</TableHead><TableHead>Status</TableHead><TableHead>Notes</TableHead>
+            <TableHead>Number</TableHead><TableHead>Route</TableHead><TableHead>Date</TableHead><TableHead>Items</TableHead><TableHead>Status</TableHead><TableHead>Notes</TableHead>
           </TableRow></TableHeader>
           <TableBody>
-            {isLoading ? <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow> :
-            transfers.length === 0 ? <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No transfers</TableCell></TableRow> :
+            {isLoading ? <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow> :
+            transfers.length === 0 ? <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No transfers</TableCell></TableRow> :
             transfers.map((t: any) => (
-              <TableRow key={t.id}>
+              <TableRow key={t.id} className="cursor-pointer hover:bg-muted/30" onClick={() => navigate(`/inventory/stock-transfers/${t.id}`)}>
                 <TableCell className="font-medium">{t.document_number || t.documentNumber}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  <span className="inline-flex items-center gap-2">
+                    {t.from_warehouse_name || "Source"} <ArrowRightLeft className="w-3.5 h-3.5" /> {t.to_warehouse_name || "Destination"}
+                  </span>
+                </TableCell>
                 <TableCell>{t.date}</TableCell>
+                <TableCell>{Number(t.item_count || 0)}</TableCell>
                 <TableCell><StatusBadge status={t.status} /></TableCell>
                 <TableCell className="text-muted-foreground">{t.notes}</TableCell>
               </TableRow>

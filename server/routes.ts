@@ -138,6 +138,52 @@ async function updateStock(itemId: string, qty: number, movementType: any, refId
     VALUES (${movementId}, ${itemId}, ${movementType}, ${qty}, ${effectiveCost}, ${refId}, ${refType}, ${userId || null}, GETDATE())`;
 }
 
+async function adjustWarehouseStock(warehouseId: string | null | undefined, itemId: string, delta: number) {
+  if (!warehouseId || !itemId || !Number.isFinite(delta) || delta === 0) return;
+
+  const existing = await db.query`
+    SELECT TOP 1 * FROM warehouse_stock
+    WHERE warehouse_id = ${warehouseId} AND item_id = ${itemId}
+  `.then((result) => result.recordset[0]);
+
+  if (existing) {
+    await db.query`
+      UPDATE warehouse_stock
+      SET quantity = ${Number(existing.quantity || 0) + delta}, updated_at = GETDATE()
+      WHERE id = ${existing.id}
+    `;
+    return;
+  }
+
+  await db.query`
+    INSERT INTO warehouse_stock (id, warehouse_id, item_id, quantity, updated_at)
+    VALUES (${uuidv4()}, ${warehouseId}, ${itemId}, ${delta}, GETDATE())
+  `;
+}
+
+async function setWarehouseStock(warehouseId: string | null | undefined, itemId: string, quantity: number) {
+  if (!warehouseId || !itemId || !Number.isFinite(quantity)) return;
+
+  const existing = await db.query`
+    SELECT TOP 1 * FROM warehouse_stock
+    WHERE warehouse_id = ${warehouseId} AND item_id = ${itemId}
+  `.then((result) => result.recordset[0]);
+
+  if (existing) {
+    await db.query`
+      UPDATE warehouse_stock
+      SET quantity = ${quantity}, updated_at = GETDATE()
+      WHERE id = ${existing.id}
+    `;
+    return;
+  }
+
+  await db.query`
+    INSERT INTO warehouse_stock (id, warehouse_id, item_id, quantity, updated_at)
+    VALUES (${uuidv4()}, ${warehouseId}, ${itemId}, ${quantity}, GETDATE())
+  `;
+}
+
 function normalizeAccountText(value: string) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -490,7 +536,18 @@ router.delete("/customers/:id", authenticate, async (req, res) => {
   try {
     await db.query`DELETE FROM customers WHERE id = ${req.params.id}`;
     res.json({ success: true });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch (e: any) {
+    const message = String(e?.message || "");
+    if (
+      message.includes("DELETE statement conflicted") ||
+      message.includes("REFERENCE constraint") ||
+      message.includes("FK_")
+    ) {
+      res.status(400).json({ error: "Customer cannot be deleted because it is linked to existing transactions." });
+      return;
+    }
+    res.status(500).json({ error: e.message });
+  }
 });
 
 router.get("/customers/:id/ledger", authenticate, async (req, res) => {
@@ -627,7 +684,18 @@ router.delete("/vendors/:id", authenticate, async (req, res) => {
   try {
     await db.query`DELETE FROM vendors WHERE id = ${req.params.id}`;
     res.json({ success: true });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch (e: any) {
+    const message = String(e?.message || "");
+    if (
+      message.includes("DELETE statement conflicted") ||
+      message.includes("REFERENCE constraint") ||
+      message.includes("FK_")
+    ) {
+      res.status(400).json({ error: "Vendor cannot be deleted because it is linked to existing purchase records." });
+      return;
+    }
+    res.status(500).json({ error: e.message });
+  }
 });
 
 router.get("/vendors/:id/ledger", authenticate, async (req, res) => {
@@ -1022,6 +1090,25 @@ router.get("/stock-movements", authenticate, async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+router.get("/stock-movements/:id", authenticate, async (req, res) => {
+  try {
+    const movement = await db.query`
+      SELECT
+        sm.*,
+        i.name AS item_name,
+        i.sku AS item_sku,
+        i.unit AS item_unit,
+        i.purchase_rate,
+        CASE WHEN ISNULL(sm.cost_price, 0) = 0 THEN ISNULL(i.purchase_rate, 0) ELSE sm.cost_price END AS effective_cost
+      FROM stock_movements sm
+      LEFT JOIN items i ON sm.item_id = i.id
+      WHERE sm.id = ${req.params.id}
+    `.then((result) => result.recordset[0]);
+    if (!movement) { res.status(404).json({ error: "Not found" }); return; }
+    res.json(movement);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ===== GST SETTINGS =====
 router.get("/gst-settings", authenticate, async (req, res) => {
   try {
@@ -1381,7 +1468,38 @@ router.delete("/item-categories/:id", authenticate, async (req, res) => {
 // ===== PRICE LISTS =====
 router.get("/price-lists", authenticate, async (req, res) => {
   try {
-    await sendPaginatedResults(req, res, `SELECT * FROM price_lists ORDER BY name`, `SELECT COUNT(*) as total FROM price_lists`);
+    await sendPaginatedResults(req, res, `
+      SELECT
+        pl.*,
+        COALESCE((SELECT COUNT(*) FROM price_list_items pli WHERE pli.price_list_id = pl.id), 0) as item_count
+      FROM price_lists pl
+      ORDER BY pl.name
+    `, `SELECT COUNT(*) as total FROM price_lists`);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/price-lists/:id", authenticate, async (req, res) => {
+  try {
+    const priceList = await db.query`
+      SELECT * FROM price_lists WHERE id = ${req.params.id}
+    `.then((result) => result.recordset[0]);
+    if (!priceList) { res.status(404).json({ error: "Not found" }); return; }
+
+    const items = await db.query`
+      SELECT
+        pli.*,
+        i.name as item_name,
+        i.sku,
+        i.selling_rate,
+        i.purchase_rate,
+        i.current_stock
+      FROM price_list_items pli
+      LEFT JOIN items i ON pli.item_id = i.id
+      WHERE pli.price_list_id = ${req.params.id}
+      ORDER BY i.name ASC
+    `.then((result) => result.recordset);
+
+    res.json({ ...priceList, items });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1392,7 +1510,7 @@ router.post("/price-lists", authenticate, async (req, res) => {
     await db.query`INSERT INTO price_lists (id, name, description, is_active, created_at, updated_at) VALUES (${id}, ${name}, ${description || null}, ${is_active ?? true}, GETDATE(), GETDATE())`;
     if (items && Array.isArray(items)) {
       for (const item of items) {
-        await db.query`INSERT INTO price_list_items (id, price_list_id, item_id, rate_or_percentage) VALUES (${uuidv4()}, ${id}, ${item.item_id}, ${item.rate_or_percentage || 0})`;
+        await db.query`INSERT INTO price_list_items (id, price_list_id, item_id, rate) VALUES (${uuidv4()}, ${id}, ${item.item_id}, ${item.rate_or_percentage || item.rate || 0})`;
       }
     }
     const dataResult = await db.query`SELECT * FROM price_lists WHERE id = ${id}`;
@@ -1411,7 +1529,60 @@ router.delete("/price-lists/:id", authenticate, async (req, res) => {
 // ===== WAREHOUSES =====
 router.get("/warehouses", authenticate, async (req, res) => {
   try {
-    await sendPaginatedResults(req, res, `SELECT * FROM warehouses ORDER BY warehouse_name`, `SELECT COUNT(*) as total FROM warehouses`);
+    await sendPaginatedResults(req, res, `
+      SELECT
+        w.*,
+        COALESCE((SELECT COUNT(*) FROM stock_transfers st WHERE st.from_warehouse_id = w.id OR st.to_warehouse_id = w.id), 0) as transfer_count,
+        COALESCE((SELECT COUNT(*) FROM inventory_adjustments ia WHERE ia.warehouse_id = w.id), 0) as adjustment_count
+      FROM warehouses w
+      ORDER BY w.warehouse_name
+    `, `SELECT COUNT(*) as total FROM warehouses`);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/warehouses/:id", authenticate, async (req, res) => {
+  try {
+    const warehouse = await db.query`
+      SELECT
+        w.*,
+        COALESCE((SELECT COUNT(*) FROM stock_transfers st WHERE st.from_warehouse_id = w.id OR st.to_warehouse_id = w.id), 0) as transfer_count,
+        COALESCE((SELECT COUNT(*) FROM inventory_adjustments ia WHERE ia.warehouse_id = w.id), 0) as adjustment_count
+      FROM warehouses w
+      WHERE w.id = ${req.params.id}
+    `.then((result) => result.recordset[0]);
+    if (!warehouse) { res.status(404).json({ error: "Not found" }); return; }
+
+    const [stockItems, transfers, adjustments] = await Promise.all([
+      db.query`
+        SELECT
+          ws.*,
+          i.name as item_name,
+          i.sku,
+          i.unit
+        FROM warehouse_stock ws
+        LEFT JOIN items i ON ws.item_id = i.id
+        WHERE ws.warehouse_id = ${req.params.id}
+        ORDER BY i.name ASC
+      `.then((result) => result.recordset),
+      db.query`
+        SELECT TOP 20
+          st.*,
+          fw.warehouse_name as from_warehouse_name,
+          tw.warehouse_name as to_warehouse_name
+        FROM stock_transfers st
+        LEFT JOIN warehouses fw ON st.from_warehouse_id = fw.id
+        LEFT JOIN warehouses tw ON st.to_warehouse_id = tw.id
+        WHERE st.from_warehouse_id = ${req.params.id} OR st.to_warehouse_id = ${req.params.id}
+        ORDER BY st.created_at DESC
+      `.then((result) => result.recordset),
+      db.query`
+        SELECT TOP 20 * FROM inventory_adjustments
+        WHERE warehouse_id = ${req.params.id}
+        ORDER BY created_at DESC
+      `.then((result) => result.recordset),
+    ]);
+
+    res.json({ ...warehouse, stock_items: stockItems, transfers, adjustments });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1441,7 +1612,43 @@ router.delete("/warehouses/:id", authenticate, async (req, res) => {
 // ===== INVENTORY ADJUSTMENTS =====
 router.get("/inventory-adjustments", authenticate, async (req, res) => {
   try {
-    await sendPaginatedResults(req, res, `SELECT * FROM inventory_adjustments ORDER BY created_at DESC`, `SELECT COUNT(*) as total FROM inventory_adjustments`);
+    await sendPaginatedResults(req, res, `
+      SELECT
+        ia.*,
+        w.warehouse_name,
+        COALESCE((SELECT COUNT(*) FROM inventory_adjustment_items iai WHERE iai.adjustment_id = ia.id), 0) as item_count
+      FROM inventory_adjustments ia
+      LEFT JOIN warehouses w ON ia.warehouse_id = w.id
+      ORDER BY ia.created_at DESC
+    `, `SELECT COUNT(*) as total FROM inventory_adjustments`);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/inventory-adjustments/:id", authenticate, async (req, res) => {
+  try {
+    const adjustment = await db.query`
+      SELECT
+        ia.*,
+        w.warehouse_name
+      FROM inventory_adjustments ia
+      LEFT JOIN warehouses w ON ia.warehouse_id = w.id
+      WHERE ia.id = ${req.params.id}
+    `.then((result) => result.recordset[0]);
+    if (!adjustment) { res.status(404).json({ error: "Not found" }); return; }
+
+    const items = await db.query`
+      SELECT
+        iai.*,
+        i.name as item_name,
+        i.sku,
+        i.unit
+      FROM inventory_adjustment_items iai
+      LEFT JOIN items i ON iai.item_id = i.id
+      WHERE iai.adjustment_id = ${req.params.id}
+      ORDER BY i.name ASC
+    `.then((result) => result.recordset);
+
+    res.json({ ...adjustment, items });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1472,6 +1679,7 @@ router.post("/inventory-adjustments", authenticate, async (req: AuthRequest, res
 
         if (difference !== 0) {
           await updateStock(item.item_id, Math.abs(difference), movementType, id, 'Inventory Adjustment', movementCost);
+          await setWarehouseStock(adj.warehouse_id || null, item.item_id, adjustedQuantity);
         }
       }
     }
@@ -1483,7 +1691,47 @@ router.post("/inventory-adjustments", authenticate, async (req: AuthRequest, res
 // ===== STOCK TRANSFERS =====
 router.get("/stock-transfers", authenticate, async (req, res) => {
   try {
-    await sendPaginatedResults(req, res, `SELECT * FROM stock_transfers ORDER BY created_at DESC`, `SELECT COUNT(*) as total FROM stock_transfers`);
+    await sendPaginatedResults(req, res, `
+      SELECT
+        st.*,
+        fw.warehouse_name as from_warehouse_name,
+        tw.warehouse_name as to_warehouse_name,
+        COALESCE((SELECT COUNT(*) FROM stock_transfer_items sti WHERE sti.transfer_id = st.id), 0) as item_count
+      FROM stock_transfers st
+      LEFT JOIN warehouses fw ON st.from_warehouse_id = fw.id
+      LEFT JOIN warehouses tw ON st.to_warehouse_id = tw.id
+      ORDER BY st.created_at DESC
+    `, `SELECT COUNT(*) as total FROM stock_transfers`);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/stock-transfers/:id", authenticate, async (req, res) => {
+  try {
+    const transfer = await db.query`
+      SELECT
+        st.*,
+        fw.warehouse_name as from_warehouse_name,
+        tw.warehouse_name as to_warehouse_name
+      FROM stock_transfers st
+      LEFT JOIN warehouses fw ON st.from_warehouse_id = fw.id
+      LEFT JOIN warehouses tw ON st.to_warehouse_id = tw.id
+      WHERE st.id = ${req.params.id}
+    `.then((result) => result.recordset[0]);
+    if (!transfer) { res.status(404).json({ error: "Not found" }); return; }
+
+    const items = await db.query`
+      SELECT
+        sti.*,
+        i.name as item_name,
+        i.sku,
+        i.unit
+      FROM stock_transfer_items sti
+      LEFT JOIN items i ON sti.item_id = i.id
+      WHERE sti.transfer_id = ${req.params.id}
+      ORDER BY i.name ASC
+    `.then((result) => result.recordset);
+
+    res.json({ ...transfer, items });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1514,9 +1762,10 @@ router.post("/stock-transfers", authenticate, async (req: AuthRequest, res) => {
         await db.query`INSERT INTO stock_transfer_items (id, transfer_id, item_id, quantity) 
           VALUES (${itemId}, ${id}, ${item.item_id}, ${item.quantity})`;
 
-        // Out from source
-        await updateStock(item.item_id, item.quantity, 'out', id, 'Stock Transfer', 0, req.user!.id);
-        // In to destination (Simplified: updateStock doesn't support warehouse_id yet, but we update global stock)
+        await updateStock(item.item_id, item.quantity, 'out', id, 'Stock Transfer Out', 0, req.user!.id);
+        await updateStock(item.item_id, item.quantity, 'in', id, 'Stock Transfer In', 0, req.user!.id);
+        await adjustWarehouseStock(transfer.from_warehouse_id, item.item_id, -Number(item.quantity || 0));
+        await adjustWarehouseStock(transfer.to_warehouse_id, item.item_id, Number(item.quantity || 0));
       }
     }
     const dataResult = await db.query`SELECT * FROM stock_transfers WHERE id = ${id}`;
